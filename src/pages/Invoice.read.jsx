@@ -70,7 +70,7 @@ const InvoiceRead = () => {
       }
       setError(null);
       
-      const currentPage = reset ? 0 : page;
+      const currentPage = reset ? 1 : page;
       const params = new URLSearchParams();
       
       // Add filter parameters
