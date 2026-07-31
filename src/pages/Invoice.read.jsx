@@ -16,6 +16,8 @@ const InvoiceRead = () => {
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
   const observer = useRef();
+  const pageRef = useRef(1);
+  const loadingRef = useRef(false);
   const ITEMS_PER_PAGE = 7; // Maximum 7 per page
   
   // Filter states
@@ -32,19 +34,19 @@ const InvoiceRead = () => {
 
   useEffect(() => {
     fetchEmployees();
-    fetchInvoices(true); // Reset on initial load
+    loadInitialInvoices();
   }, []);
 
   // Infinite scroll observer
   const lastInvoiceElementRef = useCallback(node => {
-    if (loadingMore) return;
+    if (loadingRef.current) return;
     if (observer.current) observer.current.disconnect();
     
     observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loading) {
+      if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
         loadMoreInvoices();
       }
-    }, { threshold: 0.5 });
+    }, { threshold: 0.1 });
     
     if (node) observer.current.observe(node);
   }, [loadingMore, hasMore, loading]);
@@ -58,68 +60,100 @@ const InvoiceRead = () => {
     }
   };
 
-  const fetchInvoices = async (reset = false, filterParams = filters) => {
+  const loadInitialInvoices = async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    
     try {
-      if (reset) {
-        setLoading(true);
-        setPage(1);
-        setInvoices([]);
-        setHasMore(true);
-      } else {
-        setLoadingMore(true);
-      }
+      setLoading(true);
       setError(null);
+      setPage(1);
+      pageRef.current = 1;
       
-      const currentPage = reset ? 1 : page;
       const params = new URLSearchParams();
-      
-      // Add filter parameters
-      Object.keys(filterParams).forEach(key => {
-        if (filterParams[key]) {
-          params.append(key, filterParams[key]);
+      Object.keys(filters).forEach(key => {
+        if (filters[key]) {
+          params.append(key, filters[key]);
         }
       });
       
-      // Add pagination parameters
-      params.append('page', currentPage);
+      params.append('page', 1);
       params.append('limit', ITEMS_PER_PAGE);
       
       const queryString = params.toString();
-      const url = `${API_BASE_URL}/invoice/sp?${queryString}`;
+      const url = `${API_BASE_URL}/invoice?${queryString}`;
       
       const response = await axios.get(url);
       const data = response.data.data || response.data || [];
       const count = response.data.count || response.data.totalCount || 0;
       
-      if (reset) {
-        setInvoices(data);
-        setTotalCount(count);
-        if (data.length < ITEMS_PER_PAGE) {
-          setHasMore(false);
-        }
-        if (count !== undefined) {
-          setSuccess(`${count} invoice(s) loaded`);
-        }
-      } else {
-        setInvoices(prev => [...prev, ...data]);
-        if (data.length < ITEMS_PER_PAGE) {
-          setHasMore(false);
-        }
-      }
+      setInvoices(data);
+      setTotalCount(count);
+      setHasMore(data.length >= ITEMS_PER_PAGE);
       
+      if (count > 0) {
+        setSuccess(`${count} invoice(s) loaded`);
+      }
     } catch (error) {
       console.error('Error fetching invoices:', error);
       setError('Failed to load invoices. Please try again later.');
     } finally {
       setLoading(false);
-      setLoadingMore(false);
+      loadingRef.current = false;
     }
   };
 
-  const loadMoreInvoices = () => {
-    if (!loadingMore && hasMore) {
-      setPage(prevPage => prevPage + 1);
-      fetchInvoices(false);
+  const loadMoreInvoices = async () => {
+    if (loadingRef.current || !hasMore) return;
+    loadingRef.current = true;
+    
+    try {
+      setLoadingMore(true);
+      setError(null);
+      
+      const nextPage = pageRef.current + 1;
+      
+      const params = new URLSearchParams();
+      Object.keys(filters).forEach(key => {
+        if (filters[key]) {
+          params.append(key, filters[key]);
+        }
+      });
+      
+      params.append('page', nextPage);
+      params.append('limit', ITEMS_PER_PAGE);
+      
+      const queryString = params.toString();
+      const url = `${API_BASE_URL}/invoice?${queryString}`;
+      
+      const response = await axios.get(url);
+      const data = response.data.data || response.data || [];
+      
+      if (data.length > 0) {
+        setInvoices(prev => {
+          // Prevent duplicates by checking existing IDs
+          const existingIds = new Set(prev.map(inv => inv._id));
+          const newInvoices = data.filter(inv => !existingIds.has(inv._id));
+          
+          // Only update if there are new invoices
+          if (newInvoices.length > 0) {
+            pageRef.current = nextPage;
+            setPage(nextPage);
+            return [...prev, ...newInvoices];
+          }
+          return prev;
+        });
+        
+        setHasMore(data.length >= ITEMS_PER_PAGE);
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Error loading more invoices:', error);
+      setError('Failed to load more invoices.');
+    } finally {
+      setLoadingMore(false);
+      loadingRef.current = false;
     }
   };
 
@@ -132,12 +166,7 @@ const InvoiceRead = () => {
   };
 
   const applyFilters = () => {
-    const hasFilters = Object.values(filters).some(v => v);
-    if (hasFilters) {
-      fetchInvoices(true, filters);
-    } else {
-      fetchInvoices(true, {});
-    }
+    loadInitialInvoices();
   };
 
   const clearFilters = () => {
@@ -151,7 +180,8 @@ const InvoiceRead = () => {
       endDate: '',
       employeeName: ''
     });
-    fetchInvoices(true, {});
+    // Filters will be applied after state update
+    setTimeout(() => loadInitialInvoices(), 0);
   };
 
   const handleViewInvoice = (invoice) => {
@@ -189,9 +219,6 @@ const InvoiceRead = () => {
     );
     return calculateEmployeeCommission(invoice.products, employee?.employeeCommission || []);
   };
-
-
-
 
   // Print individual invoice (keeping original functionality)
   const handlePrint = (invoiceId) => {
@@ -674,7 +701,7 @@ const InvoiceRead = () => {
                 title="Print filtered invoices list">
                 🖨️ Print List
               </button>
-              <button onClick={() => fetchInvoices(true)}
+              <button onClick={loadInitialInvoices}
                 className="px-2.5 py-1 bg-white text-blue-600 rounded-md hover:bg-gray-100 text-xs font-medium w-full sm:w-auto">
                 🔄 Refresh
               </button>
@@ -823,7 +850,7 @@ const InvoiceRead = () => {
               )}
               
               {/* End of List Indicator */}
-              {!hasMore && invoices.length > 0 && (
+              {!hasMore && invoices.length > 0 && !loadingMore && (
                 <div className="text-center py-4 text-xs text-gray-500">
                   All invoices loaded ({invoices.length} total)
                 </div>
