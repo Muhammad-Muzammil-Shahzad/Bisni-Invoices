@@ -62,7 +62,7 @@ const InvoiceRead = () => {
     try {
       if (reset) {
         setLoading(true);
-        setPage(0);
+        setPage(1);
         setInvoices([]);
         setHasMore(true);
       } else {
@@ -70,7 +70,7 @@ const InvoiceRead = () => {
       }
       setError(null);
       
-      const currentPage = reset ? 2 : page;
+      const currentPage = reset ? 1 : page;
       const params = new URLSearchParams();
       
       // Add filter parameters
