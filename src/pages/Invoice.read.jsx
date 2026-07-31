@@ -32,7 +32,7 @@ const InvoiceRead = () => {
 
   useEffect(() => {
     fetchEmployees();
-    fetchInvoices(1, {}); // Start with page 1 and empty filters
+    fetchInvoices(true); // Reset on initial load
   }, []);
 
   // Infinite scroll observer
@@ -41,7 +41,7 @@ const InvoiceRead = () => {
     if (observer.current) observer.current.disconnect();
     
     observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
+      if (entries[0].isIntersecting && hasMore && !loading) {
         loadMoreInvoices();
       }
     }, { threshold: 0.5 });
@@ -58,10 +58,11 @@ const InvoiceRead = () => {
     }
   };
 
-  const fetchInvoices = async (pageNum, filterParams) => {
+  const fetchInvoices = async (reset = false, filterParams = filters) => {
     try {
-      if (pageNum === 1) {
+      if (reset) {
         setLoading(true);
+        setPage(1);
         setInvoices([]);
         setHasMore(true);
       } else {
@@ -69,6 +70,7 @@ const InvoiceRead = () => {
       }
       setError(null);
       
+      const currentPage = reset ? 1 : page;
       const params = new URLSearchParams();
       
       // Add filter parameters
@@ -79,31 +81,30 @@ const InvoiceRead = () => {
       });
       
       // Add pagination parameters
-      params.append('page', pageNum);
+      params.append('page', currentPage);
       params.append('limit', ITEMS_PER_PAGE);
       
       const queryString = params.toString();
-      const url = `${API_BASE_URL}/invoice?${queryString}`;
+      const url = `${API_BASE_URL}/invoice/sp?${queryString}`;
       
       const response = await axios.get(url);
       const data = response.data.data || response.data || [];
       const count = response.data.count || response.data.totalCount || 0;
       
-      if (pageNum === 1) {
+      if (reset) {
         setInvoices(data);
         setTotalCount(count);
-        setHasMore(data.length >= ITEMS_PER_PAGE);
-        if (count !== undefined && count > 0) {
+        if (data.length < ITEMS_PER_PAGE) {
+          setHasMore(false);
+        }
+        if (count !== undefined) {
           setSuccess(`${count} invoice(s) loaded`);
         }
       } else {
-        setInvoices(prev => {
-          // Prevent duplicates by checking if the invoice already exists
-          const existingIds = new Set(prev.map(inv => inv._id));
-          const newInvoices = data.filter(inv => !existingIds.has(inv._id));
-          return [...prev, ...newInvoices];
-        });
-        setHasMore(data.length >= ITEMS_PER_PAGE);
+        setInvoices(prev => [...prev, ...data]);
+        if (data.length < ITEMS_PER_PAGE) {
+          setHasMore(false);
+        }
       }
       
     } catch (error) {
@@ -117,9 +118,8 @@ const InvoiceRead = () => {
 
   const loadMoreInvoices = () => {
     if (!loadingMore && hasMore) {
-      const nextPage = page + 1;
-      setPage(nextPage);
-      fetchInvoices(nextPage, filters);
+      setPage(prevPage => prevPage + 1);
+      fetchInvoices(false);
     }
   };
 
@@ -132,12 +132,16 @@ const InvoiceRead = () => {
   };
 
   const applyFilters = () => {
-    setPage(1);
-    fetchInvoices(1, filters);
+    const hasFilters = Object.values(filters).some(v => v);
+    if (hasFilters) {
+      fetchInvoices(true, filters);
+    } else {
+      fetchInvoices(true, {});
+    }
   };
 
   const clearFilters = () => {
-    const emptyFilters = {
+    setFilters({
       employeeCategory: '',
       customerName: '',
       customerMobileNumber: '',
@@ -146,10 +150,8 @@ const InvoiceRead = () => {
       startDate: '',
       endDate: '',
       employeeName: ''
-    };
-    setFilters(emptyFilters);
-    setPage(1);
-    fetchInvoices(1, emptyFilters);
+    });
+    fetchInvoices(true, {});
   };
 
   const handleViewInvoice = (invoice) => {
@@ -188,7 +190,10 @@ const InvoiceRead = () => {
     return calculateEmployeeCommission(invoice.products, employee?.employeeCommission || []);
   };
 
-  // Print individual invoice
+
+
+
+  // Print individual invoice (keeping original functionality)
   const handlePrint = (invoiceId) => {
     const inv = invoices.find(i => i._id === invoiceId || i.invoiceId === invoiceId);
     if (!inv) {
@@ -311,35 +316,85 @@ const InvoiceRead = () => {
         </table>
       </div>
 
-      <table style="width:100%;border-collapse:collapse;font-size:18px;font-family:Arial,sans-serif;margin-top:10px;">
-        <tr>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">To</td>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">${inv.customerName || 'N/A'}</td>
-        </tr>
-        <tr>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">Contact</td>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">${inv.customerMobileNumber1 || 'N/A'} || ${inv.customerMobileNumber2 || 'N/A'}</td>
-        </tr>
-        <tr>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">Address</td>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">${inv.customerAddress || 'N/A'}</td>
-        </tr>
-      </table>
+      <table style="
+    width:100%;
+    border-collapse:collapse;
+    font-size:18px;
+    font-family:Arial, sans-serif;
+    margin-top:10px;
+">
+    </tr>
+    <tr>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;" >
+            To
+        </td>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;" >
+            ${inv.customerName || 'N/A'}
+        </td>
 
-      <table style="width:100%;border-collapse:collapse;font-size:18px;font-family:Arial,sans-serif;margin-top:10px;">
-        <tr>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">From</td>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">${inv.employeeName || 'N/A'}</td>
-        </tr>
-        <tr>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">Contact</td>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">${inv.employeeMobileNumber || 'N/A'}</td>
-        </tr>
-        <tr>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">Address</td>
-          <td style="border:2px solid #000;padding:4px 6px;font-weight:bold;font-size:22px;">${inv.employeeAddress || 'N/A'}</td>
-        </tr>
-      </table>
+    </tr>
+
+    <tr>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            Contact
+        </td>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            ${inv.customerMobileNumber1 || 'N/A'} &nbsp;&nbsp;&nbsp; || &nbsp;&nbsp;&nbsp; ${inv.customerMobileNumber2 || 'N/A'}
+        </td>
+
+    </tr>
+
+    <tr>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            Address
+        </td>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            ${inv.customerAddress || 'N/A'}
+        </td>
+
+    </tr>
+</table>
+
+
+      <table style="
+    width:100%;
+    border-collapse:collapse;
+    font-size:18px;
+    font-family:Arial, sans-serif;
+    margin-top:10px;
+">
+    </tr>
+    <tr>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;" >
+            From
+        </td>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;" >
+            ${inv.employeeName || 'N/A'}
+        </td>
+
+    </tr>
+
+    <tr>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            Contact
+        </td>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            ${inv.employeeMobileNumber || 'N/A'}
+        </td>
+
+    </tr>
+
+
+    <tr>
+        <td style="border:2px solid #000; padding-top:2px; padding-bottom:2px; padding-left:3px; padding-right:3px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            Address
+        </td>
+        <td style="border:2px solid #000; padding-top:4px; padding-bottom:4px; padding-left:6px; padding-right:6px; font-weight:bold; font-size: 22px; font-family: sans-serif;">
+            ${inv.employeeAddress || 'N/A'}
+        </td>
+
+    </tr>
+</table>
 
       <div class="footer">
         <p>Generated by Bisni Sales Management | Thank you for Your Order!</p>
@@ -357,7 +412,7 @@ const InvoiceRead = () => {
     printWindow.document.close();
   };
 
-  // Print filtered invoices list
+  // Print filtered invoices list (keeping original functionality)
   const handlePrintFilteredList = () => {
     if (invoices.length === 0) {
       setError('No invoices to print');
@@ -372,6 +427,7 @@ const InvoiceRead = () => {
       });
     };
 
+    // Calculate total commission and total amount
     let totalCommission = 0;
     let totalAmount = 0;
 
@@ -618,10 +674,7 @@ const InvoiceRead = () => {
                 title="Print filtered invoices list">
                 🖨️ Print List
               </button>
-              <button onClick={() => {
-                setPage(1);
-                fetchInvoices(1, filters);
-              }}
+              <button onClick={() => fetchInvoices(true)}
                 className="px-2.5 py-1 bg-white text-blue-600 rounded-md hover:bg-gray-100 text-xs font-medium w-full sm:w-auto">
                 🔄 Refresh
               </button>
@@ -770,7 +823,7 @@ const InvoiceRead = () => {
               )}
               
               {/* End of List Indicator */}
-              {!hasMore && invoices.length > 0 && !loadingMore && (
+              {!hasMore && invoices.length > 0 && (
                 <div className="text-center py-4 text-xs text-gray-500">
                   All invoices loaded ({invoices.length} total)
                 </div>
@@ -957,5 +1010,3 @@ const InvoiceRead = () => {
     </div>
   );
 };
-
-export default InvoiceRead;
