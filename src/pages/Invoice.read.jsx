@@ -1010,3 +1010,5 @@ const InvoiceRead = () => {
     </div>
   );
 };
+
+export default InvoiceRead;
