@@ -62,7 +62,7 @@ const InvoiceRead = () => {
     try {
       if (reset) {
         setLoading(true);
-        setPage(2);
+        setPage(1);
         setInvoices([]);
         setHasMore(true);
       } else {
