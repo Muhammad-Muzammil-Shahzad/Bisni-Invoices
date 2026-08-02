@@ -1,5 +1,5 @@
 // InvoiceRead.jsx - Displays all invoices from database without session filter
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const API_BASE_URL = 'https://bisni-ms-backend.onrender.com/api';
@@ -7,18 +7,10 @@ const API_BASE_URL = 'https://bisni-ms-backend.onrender.com/api';
 const InvoiceRead = () => {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [employees, setEmployees] = useState([]);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [totalCount, setTotalCount] = useState(0);
-  const observer = useRef();
-  const pageRef = useRef(1);
-  const loadingRef = useRef(false);
-  const ITEMS_PER_PAGE = 7; // Maximum 7 per page
   
   // Filter states
   const [filters, setFilters] = useState({
@@ -33,23 +25,9 @@ const InvoiceRead = () => {
   });
 
   useEffect(() => {
+    fetchInvoices();
     fetchEmployees();
-    loadInitialInvoices();
   }, []);
-
-  // Infinite scroll observer
-  const lastInvoiceElementRef = useCallback(node => {
-    if (loadingRef.current) return;
-    if (observer.current) observer.current.disconnect();
-    
-    observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
-        loadMoreInvoices();
-      }
-    }, { threshold: 0.1 });
-    
-    if (node) observer.current.observe(node);
-  }, [loadingMore, hasMore, loading]);
 
   const fetchEmployees = async () => {
     try {
@@ -60,100 +38,35 @@ const InvoiceRead = () => {
     }
   };
 
-  const loadInitialInvoices = async () => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-    
+  const fetchInvoices = async (filterParams = {}) => {
     try {
       setLoading(true);
       setError(null);
-      setPage(1);
-      pageRef.current = 1;
       
       const params = new URLSearchParams();
-      Object.keys(filters).forEach(key => {
-        if (filters[key]) {
-          params.append(key, filters[key]);
+      
+      Object.keys(filterParams).forEach(key => {
+        if (filterParams[key]) {
+          params.append(key, filterParams[key]);
         }
       });
       
-      params.append('page', 1);
-      params.append('limit', ITEMS_PER_PAGE);
-      
       const queryString = params.toString();
-      const url = `${API_BASE_URL}/invoice?${queryString}`;
+      const url = queryString ? `${API_BASE_URL}/invoice?${queryString}` : `${API_BASE_URL}/invoice`;
       
       const response = await axios.get(url);
       const data = response.data.data || response.data || [];
-      const count = response.data.count || response.data.totalCount || 0;
-      
       setInvoices(data);
-      setTotalCount(count);
-      setHasMore(data.length >= ITEMS_PER_PAGE);
       
-      if (count > 0) {
-        setSuccess(`${count} invoice(s) loaded`);
+      if (response.data.count !== undefined) {
+        setSuccess(`${response.data.count} invoice(s) loaded`);
       }
+      
     } catch (error) {
       console.error('Error fetching invoices:', error);
       setError('Failed to load invoices. Please try again later.');
     } finally {
       setLoading(false);
-      loadingRef.current = false;
-    }
-  };
-
-  const loadMoreInvoices = async () => {
-    if (loadingRef.current || !hasMore) return;
-    loadingRef.current = true;
-    
-    try {
-      setLoadingMore(true);
-      setError(null);
-      
-      const nextPage = pageRef.current + 1;
-      
-      const params = new URLSearchParams();
-      Object.keys(filters).forEach(key => {
-        if (filters[key]) {
-          params.append(key, filters[key]);
-        }
-      });
-      
-      params.append('page', nextPage);
-      params.append('limit', ITEMS_PER_PAGE);
-      
-      const queryString = params.toString();
-      const url = `${API_BASE_URL}/invoice?${queryString}`;
-      
-      const response = await axios.get(url);
-      const data = response.data.data || response.data || [];
-      
-      if (data.length > 0) {
-        setInvoices(prev => {
-          // Prevent duplicates by checking existing IDs
-          const existingIds = new Set(prev.map(inv => inv._id));
-          const newInvoices = data.filter(inv => !existingIds.has(inv._id));
-          
-          // Only update if there are new invoices
-          if (newInvoices.length > 0) {
-            pageRef.current = nextPage;
-            setPage(nextPage);
-            return [...prev, ...newInvoices];
-          }
-          return prev;
-        });
-        
-        setHasMore(data.length >= ITEMS_PER_PAGE);
-      } else {
-        setHasMore(false);
-      }
-    } catch (error) {
-      console.error('Error loading more invoices:', error);
-      setError('Failed to load more invoices.');
-    } finally {
-      setLoadingMore(false);
-      loadingRef.current = false;
     }
   };
 
@@ -166,7 +79,12 @@ const InvoiceRead = () => {
   };
 
   const applyFilters = () => {
-    loadInitialInvoices();
+    const hasFilters = Object.values(filters).some(v => v);
+    if (hasFilters) {
+      fetchInvoices(filters);
+    } else {
+      fetchInvoices();
+    }
   };
 
   const clearFilters = () => {
@@ -180,8 +98,7 @@ const InvoiceRead = () => {
       endDate: '',
       employeeName: ''
     });
-    // Filters will be applied after state update
-    setTimeout(() => loadInitialInvoices(), 0);
+    fetchInvoices();
   };
 
   const handleViewInvoice = (invoice) => {
@@ -220,7 +137,7 @@ const InvoiceRead = () => {
     return calculateEmployeeCommission(invoice.products, employee?.employeeCommission || []);
   };
 
-  // Print individual invoice (keeping original functionality)
+  // Print individual invoice
   const handlePrint = (invoiceId) => {
     const inv = invoices.find(i => i._id === invoiceId || i.invoiceId === invoiceId);
     if (!inv) {
@@ -439,7 +356,7 @@ const InvoiceRead = () => {
     printWindow.document.close();
   };
 
-  // Print filtered invoices list (keeping original functionality)
+  // Print filtered invoices list
   const handlePrintFilteredList = () => {
     if (invoices.length === 0) {
       setError('No invoices to print');
@@ -693,7 +610,7 @@ const InvoiceRead = () => {
         <div className="bg-white rounded-lg shadow-md overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-cyan-600 px-3 sm:px-4 py-2 sm:py-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
             <h2 className="text-xs sm:text-sm font-semibold text-white">
-              Invoice List ({totalCount || invoices.length})
+              Invoice List ({invoices.length})
             </h2>
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button onClick={handlePrintFilteredList}
@@ -701,7 +618,7 @@ const InvoiceRead = () => {
                 title="Print filtered invoices list">
                 🖨️ Print List
               </button>
-              <button onClick={loadInitialInvoices}
+              <button onClick={() => fetchInvoices()}
                 className="px-2.5 py-1 bg-white text-blue-600 rounded-md hover:bg-gray-100 text-xs font-medium w-full sm:w-auto">
                 🔄 Refresh
               </button>
@@ -728,56 +645,49 @@ const InvoiceRead = () => {
             <div className="overflow-x-auto">
               {/* Mobile Card View */}
               <div className="block lg:hidden">
-                {invoices.map((invoice, index) => {
-                  const isLastElement = index === invoices.length - 1;
-                  return (
-                    <div 
-                      key={invoice._id} 
-                      ref={isLastElement ? lastInvoiceElementRef : null}
-                      className="border-b border-gray-200 p-3 hover:bg-gray-50 transition duration-150"
-                    >
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-gray-900 truncate">{invoice.invoiceId}</div>
-                          <div className="text-xs text-gray-500">{formatDate(invoice.createdAt)}</div>
-                        </div>
-                        <div className="text-right flex-shrink-0 ml-2">
-                          <div className="text-xs font-bold text-green-600">Rs. {formatCurrency(invoice.grandTotalAmount)}</div>
-                        </div>
+                {invoices.map((invoice) => (
+                  <div key={invoice._id} className="border-b border-gray-200 p-3 hover:bg-gray-50 transition duration-150">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium text-gray-900 truncate">{invoice.invoiceId}</div>
+                        <div className="text-xs text-gray-500">{formatDate(invoice.createdAt)}</div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
-                        <div>
-                          <span className="text-gray-500">Customer: </span>
-                          <span className="font-medium">{invoice.customerName}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Employee: </span>
-                          <span className="font-medium">{invoice.employeeName}</span>
-                        </div>
-                        {invoice.customerMobileNumber1 && (
-                          <div>
-                            <span className="text-gray-500">Mobile: </span>
-                            <span className="font-medium">{invoice.customerMobileNumber1}</span>
-                          </div>
-                        )}
-                        <div>
-                          <span className="text-gray-500">Items: </span>
-                          <span className="font-medium">{calculateTotalItems(invoice.products)}</span>
-                        </div>
-                      </div>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => handleViewInvoice(invoice)}
-                          className="flex-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-medium text-center">
-                          View Details
-                        </button>
-                        <button onClick={() => handlePrint(invoice._id)}
-                          className="px-2 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-medium">
-                          🖨️ Print
-                        </button>
+                      <div className="text-right flex-shrink-0 ml-2">
+                        <div className="text-xs font-bold text-green-600">Rs. {formatCurrency(invoice.grandTotalAmount)}</div>
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
+                      <div>
+                        <span className="text-gray-500">Customer: </span>
+                        <span className="font-medium">{invoice.customerName}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Employee: </span>
+                        <span className="font-medium">{invoice.employeeName}</span>
+                      </div>
+                      {invoice.customerMobileNumber1 && (
+                        <div>
+                          <span className="text-gray-500">Mobile: </span>
+                          <span className="font-medium">{invoice.customerMobileNumber1}</span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-gray-500">Items: </span>
+                        <span className="font-medium">{calculateTotalItems(invoice.products)}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => handleViewInvoice(invoice)}
+                        className="flex-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-medium text-center">
+                        View Details
+                      </button>
+                      <button onClick={() => handlePrint(invoice._id)}
+                        className="px-2 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-medium">
+                        🖨️ Print
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* Desktop Table View */}
@@ -790,71 +700,49 @@ const InvoiceRead = () => {
                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Employee</th>
                     <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase hidden xl:table-cell">Items</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Grand Total</th>
-                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase w-28">Actions</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase w-20">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {invoices.map((invoice, index) => {
-                    const isLastElement = index === invoices.length - 1;
-                    return (
-                      <tr 
-                        key={invoice._id} 
-                        ref={isLastElement ? lastInvoiceElementRef : null}
-                        className="hover:bg-gray-50 transition duration-150"
-                      >
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <div className="text-xs font-medium text-gray-900">{invoice.invoiceId}</div>
-                          <div className="text-xs text-gray-500 md:hidden">{formatDate(invoice.createdAt)}</div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">{formatDate(invoice.createdAt)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap hidden md:table-cell">
-                          <div className="text-xs font-medium text-gray-900">{invoice.customerName}</div>
-                          <div className="text-xs text-gray-500">{invoice.customerMobileNumber1}</div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap hidden lg:table-cell">
-                          <div className="text-xs text-gray-900">{invoice.employeeName}</div>
-                          <div className="text-xs text-gray-500">{invoice.employeeCategory}</div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-center hidden xl:table-cell">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                            {calculateTotalItems(invoice.products)} items
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-right text-xs font-bold text-green-600">
-                          Rs. {formatCurrency(invoice.grandTotalAmount)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => handleViewInvoice(invoice)}
-                              className="inline-flex items-center px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-medium">
-                              View
-                            </button>
-                            <button onClick={() => handlePrint(invoice._id)}
-                              className="inline-flex items-center px-2 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-medium">
-                              🖨️
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {invoices.map((invoice) => (
+                    <tr key={invoice._id} className="hover:bg-gray-50 transition duration-150">
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <div className="text-xs font-medium text-gray-900">{invoice.invoiceId}</div>
+                        <div className="text-xs text-gray-500 md:hidden">{formatDate(invoice.createdAt)}</div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">{formatDate(invoice.createdAt)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap hidden md:table-cell">
+                        <div className="text-xs font-medium text-gray-900">{invoice.customerName}</div>
+                        <div className="text-xs text-gray-500">{invoice.customerMobileNumber1}</div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap hidden lg:table-cell">
+                        <div className="text-xs text-gray-900">{invoice.employeeName}</div>
+                        <div className="text-xs text-gray-500">{invoice.employeeCategory}</div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-center hidden xl:table-cell">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          {calculateTotalItems(invoice.products)} items
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-right text-xs font-bold text-green-600">
+                        Rs. {formatCurrency(invoice.grandTotalAmount)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={() => handleViewInvoice(invoice)}
+                            className="inline-flex items-center px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-medium">
+                            View
+                          </button>
+                          <button onClick={() => handlePrint(invoice._id)}
+                            className="inline-flex items-center px-2 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-medium">
+                            🖨️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-              
-              {/* Loading More Indicator */}
-              {loadingMore && (
-                <div className="flex justify-center items-center py-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                  <span className="ml-2 text-xs text-gray-600">Loading more invoices...</span>
-                </div>
-              )}
-              
-              {/* End of List Indicator */}
-              {!hasMore && invoices.length > 0 && !loadingMore && (
-                <div className="text-center py-4 text-xs text-gray-500">
-                  All invoices loaded ({invoices.length} total)
-                </div>
-              )}
             </div>
           )}
         </div>
